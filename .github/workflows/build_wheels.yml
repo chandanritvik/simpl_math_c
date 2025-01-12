@@ -9,23 +9,21 @@ on:
       - main
 
 env:
-  CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"  # Python versions to build for
-  CIBW_SKIP: "*-musllinux*"  # Skip musllinux builds
-  CIBW_ARCHS_MACOS: "x86_64 arm64"  # Build for both Intel and M1 Macs
+  CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
+  CIBW_SKIP: "*-musllinux*"
+  CIBW_ARCHS_MACOS: "x86_64 arm64"
+  # Building OpenSSL from source
   CIBW_BEFORE_BUILD_LINUX: >
-    if command -v yum >/dev/null 2>&1; then
-        yum install -y openssl-devel
-    else
-        if command -v dnf >/dev/null 2>&1; then
-            dnf install -y openssl-devel
-        else
-            if command -v apt-get >/dev/null 2>&1; then
-                apt-get update && apt-get install -y libssl-dev
-            fi
-        fi
-    fi
+    curl https://www.openssl.org/source/openssl-1.1.1k.tar.gz | tar xz &&
+    cd openssl-1.1.1k &&
+    ./config &&
+    make &&
+    make install &&
+    cd .. &&
+    rm -rf openssl-1.1.1k
   CIBW_ENVIRONMENT_WINDOWS: "OPENSSL_ROOT_DIR='C:/Program Files/OpenSSL-Win64'"
   CIBW_ENVIRONMENT_MACOS: "LDFLAGS='-L/usr/local/opt/openssl@3/lib' CPPFLAGS='-I/usr/local/opt/openssl@3/include'"
+  CIBW_BUILD_VERBOSITY: 3
 
 jobs:
   build_wheels:
@@ -43,7 +41,6 @@ jobs:
         with:
           python-version: '3.x'
 
-      # Install system dependencies for OpenSSL
       - name: Install OpenSSL (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -65,12 +62,8 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.16.2
 
-      # Add debug information
       - name: Build wheels
-        run: |
-          python -m cibuildwheel --output-dir wheelhouse
-        env:
-          CIBW_BUILD_VERBOSITY: 3
+        run: python -m cibuildwheel --output-dir wheelhouse
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
