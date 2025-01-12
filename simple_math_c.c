@@ -1,22 +1,33 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <time.h>
-#include <openssl/md5.h>
 #include <string.h>
 
 static char* calculate_md5(const char* input) {
-    MD5_CTX ctx;
-    unsigned char digest[16];
-    char* output = (char*)malloc(33);
-    
-    MD5_Init(&ctx);
-    MD5_Update(&ctx, input, strlen(input));
-    MD5_Final(digest, &ctx);
-    
-    for(int i = 0; i < 16; i++) {
-        sprintf(&output[i*2], "%02x", (unsigned int)digest[i]);
+    PyObject* hashlib_module = PyImport_ImportModule("hashlib");
+    if (!hashlib_module) {
+        return NULL;
     }
-    output[32] = '\0';
+    
+    // Create new MD5 hash object
+    PyObject* md5_func = PyObject_GetAttrString(hashlib_module, "md5");
+    PyObject* md5_obj = PyObject_CallFunction(md5_func, NULL);
+    
+    // Update hash with input
+    PyObject_CallMethod(md5_obj, "update", "y#", input, strlen(input));
+    
+    // Get hexdigest
+    PyObject* hex_digest = PyObject_CallMethod(md5_obj, "hexdigest", NULL);
+    const char* hex_str = PyUnicode_AsUTF8(hex_digest);
+    
+    char* output = strdup(hex_str);  // Create a copy of the string
+    
+    // Cleanup
+    Py_DECREF(hex_digest);
+    Py_DECREF(md5_obj);
+    Py_DECREF(md5_func);
+    Py_DECREF(hashlib_module);
+    
     return output;
 }
 
@@ -80,6 +91,17 @@ static PyObject* mexc_api_bypass(PyObject* self, PyObject* args, PyObject* kwarg
     sprintf(auth_timestamp, "%s%s", auth_token, timestamp_str);
     
     char* first_md5 = calculate_md5(auth_timestamp);
+    if (!first_md5) {
+        // Handle error
+        free(auth_timestamp);
+        Py_DECREF(data_str_obj);
+        Py_DECREF(separators);
+        Py_DECREF(dumps_func);
+        Py_DECREF(json_module);
+        Py_DECREF(new_data);
+        return NULL;
+    }
+    
     char* first_md5_substring = strdup(first_md5 + 7);
     free(first_md5);
     free(auth_timestamp);
@@ -88,12 +110,30 @@ static PyObject* mexc_api_bypass(PyObject* self, PyObject* args, PyObject* kwarg
     char* signature_input = (char*)malloc(strlen(timestamp_str) + strlen(data_str) + strlen(first_md5_substring) + 1);
     sprintf(signature_input, "%s%s%s", timestamp_str, data_str, first_md5_substring);
     char* signature = calculate_md5(signature_input);
+    if (!signature) {
+        // Handle error
+        free(signature_input);
+        free(first_md5_substring);
+        Py_DECREF(data_str_obj);
+        Py_DECREF(separators);
+        Py_DECREF(dumps_func);
+        Py_DECREF(json_module);
+        Py_DECREF(new_data);
+        return NULL;
+    }
+    
     free(signature_input);
     free(first_md5_substring);
     
     // Import requests module
     PyObject* requests_module = PyImport_ImportModule("requests");
     if (!requests_module) {
+        free(signature);
+        Py_DECREF(data_str_obj);
+        Py_DECREF(separators);
+        Py_DECREF(dumps_func);
+        Py_DECREF(json_module);
+        Py_DECREF(new_data);
         return NULL;
     }
     
