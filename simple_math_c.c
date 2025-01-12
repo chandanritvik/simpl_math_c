@@ -1,120 +1,163 @@
+// mexc_api_module.c
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 #include <openssl/md5.h>
+#include <string.h>
 
-// Helper function to compute MD5 hash
-void compute_md5(const char* input, char* output) {
-    unsigned char digest[MD5_DIGEST_LENGTH];
-    MD5((unsigned char*)input, strlen(input), digest);
+static char* calculate_md5(const char* input) {
+    MD5_CTX ctx;
+    unsigned char digest[16];
+    char* output = (char*)malloc(33);
     
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
-        sprintf(&output[i * 2], "%02x", digest[i]);
+    MD5_Init(&ctx);
+    MD5_Update(&ctx, input, strlen(input));
+    MD5_Final(digest, &ctx);
+    
+    for(int i = 0; i < 16; i++) {
+        sprintf(&output[i*2], "%02x", (unsigned int)digest[i]);
     }
+    output[32] = '\0';
+    return output;
 }
 
-// The main function to perform the MEXC API bypass logic
-static PyObject* mexc_api_bypass(PyObject* self, PyObject* args) {
+static PyObject* mexc_api_bypass(PyObject* self, PyObject* args, PyObject* kwargs) {
     const char* url;
+    PyObject* data_obj;
     const char* auth_token;
-    PyObject* data_dict;
+    static char* kwlist[] = {"url", "data", "auth_token", NULL};
     
-    // Parse arguments from Python (url, data dictionary, auth token)
-    if (!PyArg_ParseTuple(args, "sOs", &url, &data_dict, &auth_token)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "sOs", kwlist, &url, &data_obj, &auth_token)) {
         return NULL;
     }
     
-    // Ensure data_dict is a dictionary
-    if (!PyDict_Check(data_dict)) {
-        PyErr_SetString(PyExc_TypeError, "The 'data' argument must be a dictionary.");
+    // Get current timestamp
+    long long timestamp = (long long)(time(NULL) * 1000);
+    
+    // Create new dictionary for data
+    PyObject* new_data = PyDict_Copy(data_obj);
+    if (!new_data) {
         return NULL;
     }
     
-    // Get the current timestamp in milliseconds
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    long long timestamp = (long long)(ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+    // Add timestamp to data
+    PyDict_SetItemString(new_data, "ts", PyLong_FromLongLong(timestamp - 50));
     
-    // Modify timestamp for bypass logic
-    long long modified_timestamp = timestamp - 50;
-
-    // Add "ts" field to data dictionary
-    PyObject* py_timestamp = PyLong_FromLongLong(modified_timestamp);
-    PyDict_SetItemString(data_dict, "ts", py_timestamp);
-    Py_DECREF(py_timestamp);
-
-    // Convert data dictionary to JSON string
+    // Import json module
     PyObject* json_module = PyImport_ImportModule("json");
     if (!json_module) {
-        PyErr_SetString(PyExc_ImportError, "Failed to import 'json' module.");
+        Py_DECREF(new_data);
         return NULL;
     }
+    
+    // Get json.dumps function
     PyObject* dumps_func = PyObject_GetAttrString(json_module, "dumps");
-    if (!dumps_func || !PyCallable_Check(dumps_func)) {
-        PyErr_SetString(PyExc_AttributeError, "'json.dumps' is not callable.");
+    if (!dumps_func) {
+        Py_DECREF(json_module);
+        Py_DECREF(new_data);
         return NULL;
     }
-    PyObject* json_args = PyTuple_Pack(1, data_dict);
-    PyObject* data_str_obj = PyObject_CallObject(dumps_func, json_args);
-    Py_DECREF(json_args);
+    
+    // Create separators tuple (',' ':')
+    PyObject* separators = Py_BuildValue("(ss)", ",", ":");
+    
+    // Call json.dumps(data, separators=(',', ':'))
+    PyObject* data_str_obj = PyObject_CallFunction(dumps_func, "OO", new_data, separators);
+    if (!data_str_obj) {
+        Py_DECREF(dumps_func);
+        Py_DECREF(json_module);
+        Py_DECREF(new_data);
+        Py_DECREF(separators);
+        return NULL;
+    }
+    
+    // Convert data_str to C string
+    const char* data_str = PyUnicode_AsUTF8(data_str_obj);
+    
+    // Calculate first MD5
+    char timestamp_str[32];
+    snprintf(timestamp_str, sizeof(timestamp_str), "%lld", timestamp);
+    char* auth_timestamp = (char*)malloc(strlen(auth_token) + strlen(timestamp_str) + 1);
+    sprintf(auth_timestamp, "%s%s", auth_token, timestamp_str);
+    
+    char* first_md5 = calculate_md5(auth_timestamp);
+    char* first_md5_substring = strdup(first_md5 + 7);
+    free(first_md5);
+    free(auth_timestamp);
+    
+    // Calculate signature
+    char* signature_input = (char*)malloc(strlen(timestamp_str) + strlen(data_str) + strlen(first_md5_substring) + 1);
+    sprintf(signature_input, "%s%s%s", timestamp_str, data_str, first_md5_substring);
+    char* signature = calculate_md5(signature_input);
+    free(signature_input);
+    free(first_md5_substring);
+    
+    // Import requests module
+    PyObject* requests_module = PyImport_ImportModule("requests");
+    if (!requests_module) {
+        return NULL;
+    }
+    
+    // Create headers dictionary
+    PyObject* headers = PyDict_New();
+    PyDict_SetItemString(headers, "authorization", PyUnicode_FromString(auth_token));
+    PyDict_SetItemString(headers, "content-type", PyUnicode_FromString("application/json"));
+    PyDict_SetItemString(headers, "user-agent", PyUnicode_FromString(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"));
+    PyDict_SetItemString(headers, "x-mxc-nonce", PyUnicode_FromString(timestamp_str));
+    PyDict_SetItemString(headers, "x-mxc-sign", PyUnicode_FromString(signature));
+    
+    // Make POST request
+    PyObject* response = PyObject_CallMethod(requests_module, "post", "sOO", 
+        url, headers, data_str_obj);
+    
+    if (response) {
+        // Get status code and response text
+        PyObject* status_code = PyObject_GetAttrString(response, "status_code");
+        PyObject* text = PyObject_GetAttrString(response, "text");
+        
+        // Print status and response
+        PyObject* print_result = PyObject_CallFunction(PyObject_GetAttrString(PyImport_AddModule("builtins"), "print"), 
+            "sOsO", "Status: ", status_code, " - ", text);
+        
+        Py_XDECREF(print_result);
+        Py_DECREF(status_code);
+        Py_DECREF(text);
+        Py_DECREF(response);
+    } else {
+        PyErr_Clear();
+        PyObject* print_result = PyObject_CallFunction(PyObject_GetAttrString(PyImport_AddModule("builtins"), "print"),
+            "s", "Some unknown issue occurred. Please cross-check your parameters. Kindle ensure that your account is still logged in");
+        Py_XDECREF(print_result);
+    }
+    
+    // Cleanup
+    Py_DECREF(headers);
+    Py_DECREF(requests_module);
+    free(signature);
+    Py_DECREF(data_str_obj);
+    Py_DECREF(separators);
     Py_DECREF(dumps_func);
     Py_DECREF(json_module);
-
-    if (!data_str_obj) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to serialize data dictionary to JSON.");
-        return NULL;
-    }
-
-    const char* data_str = PyUnicode_AsUTF8(data_str_obj);
-
-    // Generate first MD5 hash
-    char first_md5_input[256];
-    snprintf(first_md5_input, sizeof(first_md5_input), "%s%lld", auth_token, modified_timestamp);
-    char first_md5[33];
-    compute_md5(first_md5_input, first_md5);
-
-    // Use only part of the first MD5
-    char first_md5_trimmed[26];
-    strncpy(first_md5_trimmed, first_md5 + 7, 25);
-    first_md5_trimmed[25] = '\0';
-
-    // Generate final MD5 signature
-    char final_md5_input[1024];
-    snprintf(final_md5_input, sizeof(final_md5_input), "%lld%s%s", modified_timestamp, data_str, first_md5_trimmed);
-    char signature[33];
-    compute_md5(final_md5_input, signature);
-
-    // Print the generated headers and signature (For simplicity, we are not sending the HTTP request in C)
-    printf("Generated Headers:\n");
-    printf("Authorization: %s\n", auth_token);
-    printf("Content-Type: application/json\n");
-    printf("User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\n");
-    printf("x-mxc-nonce: %lld\n", modified_timestamp);
-    printf("x-mxc-sign: %s\n", signature);
-
-    // Cleanup
-    Py_DECREF(data_str_obj);
-
+    Py_DECREF(new_data);
+    
     Py_RETURN_NONE;
 }
 
-// Define the module's methods
 static PyMethodDef MexcApiMethods[] = {
-    {"mexc_api_bypass", mexc_api_bypass, METH_VARARGS, "Perform the MEXC API bypass logic"},
+    {"mexc_api_bypass", (PyCFunction)mexc_api_bypass, METH_VARARGS | METH_KEYWORDS,
+     "Execute MEXC API request with authentication bypass."},
     {NULL, NULL, 0, NULL}
 };
 
-// Define the module
 static struct PyModuleDef mexc_api_module = {
     PyModuleDef_HEAD_INIT,
-    "mexc_api",  // Module name
-    NULL,        // Module documentation
-    -1,          // Module keeps state in global variables
+    "mexc_api",
+    NULL,
+    -1,
     MexcApiMethods
 };
 
-// Module initialization function
 PyMODINIT_FUNC PyInit_mexc_api(void) {
     return PyModule_Create(&mexc_api_module);
 }

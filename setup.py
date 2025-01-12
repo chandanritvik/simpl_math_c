@@ -1,11 +1,13 @@
 from setuptools import setup, Extension
 
-module = Extension('simple_math_c',
-                  sources=['simple_math_c.c'],
-                  libraries=["crypto"])
+module = Extension('mexc_api',
+                  sources=['mexc_api_module.c'],
+                  libraries=['ssl', 'crypto'],
+                  include_dirs=['/usr/include', '/usr/local/include'],
+                  library_dirs=['/usr/lib', '/usr/local/lib'])
 
-setup(name='simple_math_c',
+setup(name='mexc_api',
       version='1.0',
-      install_requires=[
-      "requests>=2.0.0"],
-      ext_modules=[module])
+      description='MEXC API Extension Module',
+      ext_modules=[module],
+      install_requires=['requests'])
