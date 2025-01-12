@@ -13,9 +13,17 @@ env:
   CIBW_SKIP: "*-musllinux*"  # Skip musllinux builds
   CIBW_ARCHS_MACOS: "x86_64 arm64"  # Build for both Intel and M1 Macs
   CIBW_BEFORE_BUILD_LINUX: >
-    pip install --upgrade pip &&
-    yum install -y openssl-devel || 
-    (apt-get update && apt-get install -y libssl-dev)
+    if command -v yum >/dev/null 2>&1; then
+        yum install -y openssl-devel
+    else
+        if command -v dnf >/dev/null 2>&1; then
+            dnf install -y openssl-devel
+        else
+            if command -v apt-get >/dev/null 2>&1; then
+                apt-get update && apt-get install -y libssl-dev
+            fi
+        fi
+    fi
   CIBW_ENVIRONMENT_WINDOWS: "OPENSSL_ROOT_DIR='C:/Program Files/OpenSSL-Win64'"
   CIBW_ENVIRONMENT_MACOS: "LDFLAGS='-L/usr/local/opt/openssl@3/lib' CPPFLAGS='-I/usr/local/opt/openssl@3/include'"
 
@@ -57,8 +65,12 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.16.2
 
+      # Add debug information
       - name: Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
+        run: |
+          python -m cibuildwheel --output-dir wheelhouse --debug
+        env:
+          CIBW_BUILD_VERBOSITY: 3
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
