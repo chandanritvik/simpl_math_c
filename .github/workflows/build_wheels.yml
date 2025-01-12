@@ -12,15 +12,18 @@ env:
   CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
   CIBW_SKIP: "*-musllinux*"
   CIBW_ARCHS_MACOS: "x86_64 arm64"
-  # Building OpenSSL from source
+  # Modified package installation approach with sudo
   CIBW_BEFORE_BUILD_LINUX: >
-    curl https://www.openssl.org/source/openssl-1.1.1k.tar.gz | tar xz &&
-    cd openssl-1.1.1k &&
-    ./config &&
-    make &&
-    make install &&
-    cd .. &&
-    rm -rf openssl-1.1.1k
+    if command -v yum >/dev/null 2>&1; then
+        yum -y install openssl-devel
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf -y install openssl-devel
+    else
+        export DEBIAN_FRONTEND=noninteractive &&
+        apt-get update -y &&
+        apt-get install -y libssl-dev
+    fi
+  CIBW_ENVIRONMENT_LINUX: "OPENSSL_ROOT_DIR=/usr LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH"
   CIBW_ENVIRONMENT_WINDOWS: "OPENSSL_ROOT_DIR='C:/Program Files/OpenSSL-Win64'"
   CIBW_ENVIRONMENT_MACOS: "LDFLAGS='-L/usr/local/opt/openssl@3/lib' CPPFLAGS='-I/usr/local/opt/openssl@3/include'"
   CIBW_BUILD_VERBOSITY: 3
@@ -62,8 +65,11 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.16.2
 
+      # Added debug information
       - name: Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
+        run: |
+          python -m cibuildwheel --print-build-identifiers
+          python -m cibuildwheel --output-dir wheelhouse
 
       - name: Upload wheels
         uses: actions/upload-artifact@v3
