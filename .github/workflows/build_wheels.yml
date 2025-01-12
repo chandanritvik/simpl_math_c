@@ -1,0 +1,38 @@
+name: Build Wheels
+
+on:
+  push:
+    branches:
+      - main  # This means the workflow will run when you push to the 'main' branch.
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]  # These are the platforms to build on.
+    runs-on: ${{ matrix.os }}  # Use the selected OS from the matrix.
+    
+    steps:
+      # Step 1: Checkout the repository to get the code
+      - uses: actions/checkout@v3
+
+      # Step 2: Set up Python on the selected platform
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'  # Specify the Python version you want to use (e.g., 3.8)
+
+      # Step 3: Install cibuildwheel
+      - name: Install cibuildwheel
+        run: pip install cibuildwheel
+
+      # Step 4: Build the wheels using cibuildwheel
+      - name: Build Wheels
+        run: cibuildwheel --output-dir dist  # This will build wheels and save them in the 'dist' folder.
+
+      # Step 5: Upload the built wheels as artifacts
+      - name: Upload Wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels  # Name of the artifact that will be uploaded
+          path: dist/   # Path to the directory where wheels are saved
