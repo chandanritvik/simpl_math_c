@@ -3,36 +3,49 @@ name: Build Wheels
 on:
   push:
     branches:
-      - main  # This means the workflow will run when you push to the 'main' branch.
+      - main  # Run on pushes to the 'main' branch.
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]  # These are the platforms to build on.
-    runs-on: ${{ matrix.os }}  # Use the selected OS from the matrix.
-    
-    steps:
-      # Step 1: Checkout the repository to get the code
-      - uses: actions/checkout@v3
+        os: [macos-latest, windows-latest, ubuntu-latest]  # Platforms to build on.
+    runs-on: ${{ matrix.os }}
 
-      # Step 2: Set up Python on the selected platform
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'  # Specify the Python version you want to use (e.g., 3.8)
+          python-version: ['3.8', '3.9', '3.10', '3.11']  # Define Python versions
 
-      # Step 3: Install cibuildwheel
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-dev build-essential libssl-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl
+
+      - name: Upgrade pip and setuptools
+        run: pip install --upgrade pip setuptools wheel
+
       - name: Install cibuildwheel
         run: pip install cibuildwheel
 
-      # Step 4: Build the wheels using cibuildwheel
-      - name: Build Wheels
-        run: cibuildwheel --output-dir dist  # This will build wheels and save them in the 'dist' folder.
+      - name: Clean up dist directory
+        run: rm -rf dist/
 
-      # Step 5: Upload the built wheels as artifacts
+      - name: Build Wheels
+        env:
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-*"  # Specify Python versions
+        run: cibuildwheel --output-dir dist
+
       - name: Upload Wheels
+        if: success()  # Run only if the build succeeds
         uses: actions/upload-artifact@v3
         with:
-          name: wheels  # Name of the artifact that will be uploaded
-          path: dist/   # Path to the directory where wheels are saved
+          name: wheels
+          path: dist/
