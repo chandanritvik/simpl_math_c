@@ -42,17 +42,25 @@ jobs:
       - name: Install OpenSSL (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install openssl@3
-          brew link openssl@3 --force
+          brew install openssl@3 || echo "OpenSSL already installed"
+          brew link openssl@3 --force || echo "OpenSSL link already exists"
+          export OPENSSL_ROOT_DIR="/usr/local/opt/openssl@3"
           echo "OPENSSL_ROOT_DIR=/usr/local/opt/openssl@3" >> $GITHUB_ENV
           echo "CFLAGS=-Wno-error=implicit-function-declaration -I/usr/local/opt/openssl@3/include" >> $GITHUB_ENV
           echo "LDFLAGS=-L/usr/local/opt/openssl@3/lib" >> $GITHUB_ENV
           echo "ARCHFLAGS=-arch x86_64" >> $GITHUB_ENV
-          
+
       - name: Install OpenSSL (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install openssl --force
+          choco install openssl --force || echo "OpenSSL installation may have failed"
+          if exist "C:/Program Files/OpenSSL-Win64" (
+            echo "OpenSSL installed successfully"
+          ) else (
+            echo "OpenSSL installation failed"
+            exit 1
+          )
+
           
       - name: Install build dependencies
         run: |
@@ -62,23 +70,43 @@ jobs:
       - name: Debug Info (macOS)
         if: runner.os == 'macOS'
         run: |
-          ls -la /usr/local/opt/openssl@3/lib
-          ls -la /usr/local/opt/openssl@3/include
-          brew list openssl@3
+          if [ -d /usr/local/opt/openssl@3 ]; then
+            ls -la /usr/local/opt/openssl@3/lib || echo "No lib directory found"
+            ls -la /usr/local/opt/openssl@3/include || echo "No include directory found"
+          else
+            echo "OpenSSL@3 is not installed properly"
+            exit 1
+          fi
+          brew list openssl@3 || echo "OpenSSL not properly installed"
+
           
       - name: Build wheels
         run: |
           python -m cibuildwheel --print-build-identifiers
-          python -m cibuildwheel --output-dir wheelhouse
+          python -m cibuildwheel --output-dir wheelhouse || (
+            echo "Error: Wheel build failed"
+            exit 1
+          )
         env:
-          MACOSX_DEPLOYMENT_TARGET: "10.9"
-          CIBW_BEFORE_BUILD_MACOS: >-
-            ls -la /usr/local/opt/openssl@3/lib &&
-            ls -la /usr/local/opt/openssl@3/include
-          CIBW_REPAIR_WHEEL_COMMAND_MACOS: >-
-            DYLD_LIBRARY_PATH=/usr/local/opt/openssl@3/lib delocate-listdeps {wheel} &&
-            delocate-wheel --require-archs {delocate_archs} -w {dest_dir} {wheel}
-          
+          CIBW_BUILD_VERBOSITY: 3
+          CIBW_ENVIRONMENT_WINDOWS: >
+            OPENSSL_ROOT_DIR='C:/Program Files/OpenSSL-Win64'
+            INCLUDE='C:/Program Files/OpenSSL-Win64/include;%INCLUDE%'
+            LIB='C:/Program Files/OpenSSL-Win64/lib;%LIB%'
+
+      - name: Debug Info (Windows)
+        if: failure() && runner.os == 'Windows'
+        run: |
+          echo "Environment Variables:"
+          set
+          echo "OpenSSL Directory Contents:"
+          dir "C:/Program Files/OpenSSL-Win64"
+          echo "Python and Pip Information:"
+          python --version
+          python -m pip --version
+          python -m pip list
+
+
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
