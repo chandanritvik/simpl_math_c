@@ -68,7 +68,7 @@ jobs:
       # Add debug information
       - name: Build wheels
         run: |
-          python -m cibuildwheel --output-dir wheelhouse --debug
+          python -m cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD_VERBOSITY: 3
 
