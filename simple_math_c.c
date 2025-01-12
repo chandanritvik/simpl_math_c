@@ -1,4 +1,3 @@
-// mexc_api_module.c
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <time.h>
