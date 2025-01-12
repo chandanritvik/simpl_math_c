@@ -1,8 +1,8 @@
 from setuptools import setup, Extension
 
-module = Extension('simple_math_c',
-                  sources=['simple_math_c.c'])
+module = Extension('mexc_api',
+                  sources=['mexc_api.c'])
 
-setup(name='simple_math_c',
+setup(name='mexc_api',
       version='1.0',
       ext_modules=[module])
